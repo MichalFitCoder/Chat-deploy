@@ -1,0 +1,51 @@
+.container-main{
+    display: flex;
+    flex-direction: row;
+    
+  
+}
+
+.container-aside{
+    width: 25vw;
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex-direction: column;
+}
+
+.logged-users{
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-around;
+    margin: 1% 5% 0 5%;
+    width: 90%;
+}
+
+.container-messages{
+    width: 71vw;
+    background-color: rgb(62, 62, 62);
+    border-radius: 10px;
+    margin-left: 15px;
+    margin-top: 10px;
+    height: 70vh;
+}
+
+@media screen and (max-width: 740px){
+    .container-main{
+        flex-direction: column;
+        justify-self: center;
+        justify-content: center;
+    }
+
+    .container-aside{
+        width: 99%;
+        justify-content: center;
+
+    }
+
+    .container-messages{
+        width: 95%;
+    }
+
+}

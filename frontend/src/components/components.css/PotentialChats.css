@@ -1,0 +1,40 @@
+.single-user{
+    display: flex;
+    background-color: rgb(62, 62, 62);
+    border: 1.5px gray solid;
+    padding: 10px 15px;
+    border-radius: 50px;
+    margin-bottom: 10px;
+    transform: scale(1);
+}
+
+.single-user:hover{
+    cursor: pointer;
+    transform: scale(1.05);
+    background-color: rgb(67, 67, 67);
+}
+
+.user-online {
+    display: inline-block;
+    height: 12px;
+    width: 12px;
+    border-radius: 50%;
+    background: rgb(0, 219, 0);
+    position: absolute;
+    top: -3px;
+    right: 0px;
+    z-index: 2;
+}
+
+.user-ofline {
+    display: inline-block;
+    height: 12px;
+    width: 12px;
+    border-radius: 50%;
+    background: rgb(103, 103, 103);
+    position: absolute;
+    top: -3px;
+    right: 0px;
+    z-index: 2;
+}
+  

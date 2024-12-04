@@ -1,0 +1,66 @@
+/* Stylizacja całego NavBar */
+body{
+  margin: 0;
+}
+
+.navbar {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background-color: #3b82f6;
+    color: white;
+    margin: 0;
+  
+  }
+  
+  .navbar-logo h1 {
+    font-size: 24px;
+    margin: 0;
+    color: #fff;
+    padding-left: 10px;
+  } 
+
+  .navbar-logo{
+    display: flex;
+  }
+
+  .navbar-logo img{
+    height: 30px;
+    border-radius: 25%;
+  }
+  
+  /* Linki w NavBar */
+  .navbar-links {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .navbar-links li a {
+    text-decoration: none;
+    color: white;
+    font-size: 16px;
+    font-weight: 500;
+    transition: color 0.3s ease;
+  }
+  
+  .navbar-links li a:hover {
+    color: #d1d5db;
+  }
+  
+  @media (max-width: 768px) {
+    .navbar {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  
+    .navbar-links {
+      flex-direction: column;
+      gap: 10px;
+    }
+  }
+  
