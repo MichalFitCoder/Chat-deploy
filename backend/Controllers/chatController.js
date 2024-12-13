@@ -1,4 +1,5 @@
 const chatModel = require("../Models/chatModel")
+const userModel = require("../Models/userModel")
 
 // create Chat
 const createChat = async(req, res) =>{
@@ -11,13 +12,21 @@ const createChat = async(req, res) =>{
         // If chat exist return it
         if(chat) return res.status(200).json(chat);
 
+        const firstUser = await userModel.findById(firstId);
+        const secondUser = await userModel.findById(secondId);
+
+        if (!firstUser || !secondUser) {
+            return res.status(404).json({ error: "Users not found, cannot create chat" });
+        }
+
         // Creating chat if it does not exist
         const newChat = new chatModel({
-            members: [firstId, secondId]
+            members: [firstId, secondId],
+            publicKey1: firstUser?.publicKey,
+            publicKey2: secondUser?.publicKey,
         });
 
         const response = await newChat.save();
-
         return res.status(200).json(response);
 
     }catch(error){

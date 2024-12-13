@@ -1,5 +1,8 @@
-    import  {createContext, useCallback, useEffect, useState} from "react";
+    import  {createContext, useCallback, useContext, useEffect, useState} from "react";
     import { baseUrl, postRequest } from "../utils/services";
+    import { generateKeyPair, exportPublicKey, importPublicKey ,exportPrivateKey} from "../security/keyManager";
+    import { io } from "socket.io-client";
+    import { ChatContext } from "./ChatContext";
 
     export const AuthContext = createContext()
 
@@ -19,8 +22,9 @@
             password: "",
         });
 
+
         useEffect(() =>{
-            const user = localStorage.getItem("User");
+            const user = sessionStorage.getItem("User");
             setUser(JSON.parse(user));
         },[]);
 
@@ -32,6 +36,21 @@
         const updateLoginInfo = useCallback((info) =>{
             setLoginInfo(info)   
         },[]);
+        
+        // Generating pair of keys every session, and storing private key in the session storage
+        const initializeSessionKeys = async () => {
+
+            const keyPair = await generateKeyPair();
+            const publicKey = await exportPublicKey(keyPair.publicKey);
+            //const privateKey = await exportKey(keyPair.privateKey);
+            const privateKey = await exportPrivateKey(keyPair.privateKey);
+
+            // Saving encrypted private key in session storage
+            sessionStorage.setItem("privateKey", JSON.stringify(privateKey));
+            sessionStorage.setItem("publicKey", JSON.stringify(publicKey));
+
+            return publicKey; 
+        };
 
 
         const registerUser = useCallback(async(e) => {
@@ -39,7 +58,18 @@
 
             setRegisterLoading(true);
             setRegisterError(null);
-            const response = await postRequest(`${baseUrl}/users/register`, JSON.stringify(registerInfo))
+
+            // Create Keys pair and return public key
+            const exportedPublicKey = await initializeSessionKeys(); 
+
+            // Adding public key to the registration data
+            const updatedRegisterInfo = {
+                ...registerInfo,
+                publicKey: exportedPublicKey,
+            };
+
+            // Add New user data with session key to the database
+            const response = await postRequest(`${baseUrl}/users/register`, JSON.stringify(updatedRegisterInfo))
             setRegisterLoading(false);
 
             // Handling Error
@@ -48,10 +78,11 @@
             }
 
             // If no error, log in the user
-            localStorage.setItem("User", JSON.stringify(response));
+            sessionStorage.setItem("User", JSON.stringify(response));
             setUser(response);
 
         }, [registerInfo])
+
 
         const loginUser = useCallback(async(e)=>{
 
@@ -66,16 +97,37 @@
                 return setLoginError(response);
             }
 
-            localStorage.setItem("User", JSON.stringify(response))
+            // If the user is authenticated generate new pair of keys for the session
+            const exportedPublicKey = await initializeSessionKeys(); 
+
+            // Adding public key to the user data
+            const updatedUserInfo = {
+                ...loginInfo,
+                publicKey: exportedPublicKey,
+                userId: response._id,
+            };          
+
+            const responseUpdate = await postRequest(`${baseUrl}/users/updateKey`, JSON.stringify(updatedUserInfo))
+
+            if(responseUpdate.error){
+                setLoginLoading(false);
+                return setLoginError(responseUpdate);
+            }
+            
+            sessionStorage.setItem("User", JSON.stringify(response))
             setUser(response)
 
             setLoginLoading(false);
         }, [loginInfo]);
 
-        const loguotUser = useCallback((e) => {
+
+        const logoutUser = useCallback(async(e) => {
             setLoginInfo({ email: "", password: "" });
-            localStorage.removeItem("User");
             setUser(null);
+            sessionStorage.clear();
+            sessionStorage.clear();
+            console.log("Session ended, removing password and private key");
+
         }, [setLoginInfo, setUser]);
 
         return(
@@ -86,12 +138,12 @@
             registerUser, 
             registerError,
             isRegisterLoading,
-            loguotUser,
+            logoutUser,
             loginUser,
             loginError,
             loginInfo,
             updateLoginInfo,
-            isLoginLoading
+            isLoginLoading,
             }}>
                 {children}
         </AuthContext.Provider>

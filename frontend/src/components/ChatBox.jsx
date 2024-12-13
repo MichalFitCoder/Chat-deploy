@@ -8,7 +8,7 @@ import InputEmoji from "react-input-emoji";
 
 const ChatBox = () => {
     const {user} = useContext(AuthContext);
-    const {currentChat, messages, messagesLoading, sendTextMessage, messagesError} = useContext(ChatContext);
+    const {currentChat, messages, messagesLoading, sendTextMessage, messagesError, chatDeleted} = useContext(ChatContext);
     const {recipientUser} = useFetchRecipientUser(currentChat, user);
     const [textMessage, setTextMessage] = useState("");
 
@@ -28,7 +28,8 @@ const ChatBox = () => {
     return (<>
         <div className="chat">   
         <div className="chat-header">
-            <strong>{recipientUser.name}</strong>
+            {!chatDeleted ?
+            (<strong>{recipientUser.name}</strong>) : (<strong>Other user logged out, chat was deleted :&#40;</strong>)}
         </div>  
         <div className="conversation">
             {messages && messages.map((message,index) => (
