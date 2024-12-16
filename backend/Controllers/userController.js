@@ -39,6 +39,10 @@ const encrypt = (data) => {
     }
 };
 
+const hashEmail = (email) => {
+    return crypto.createHash("sha256").update(email).digest("hex");
+};
+
 const decrypt = (hash) => {
     try {
         const secretKey = getSecretKey();
@@ -83,13 +87,22 @@ const registerUser = async (req, res) => {
             );
         }
 
-     
-        const { encryptedData: encryptedEmail, iv } = encrypt(email);
+        // Making hash of the Email to avoid duplicated in the database.
+        const emailHash = hashEmail(email);
 
-        
+        // Check if hashed email already exists
+        const existingUser = await userModel.findOne({ emailHash });
+        if (existingUser) {
+            return res.status(400).json("User with this email already exists");
+        }
+
+
+        const { encryptedData: encryptedEmail, iv } = encrypt(email);
+  
         const user = new userModel({
             name,
             email: { encryptedData: encryptedEmail, iv },
+            emailHash,
             password,
             publicKey,
         });
