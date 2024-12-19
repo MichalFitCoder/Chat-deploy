@@ -1,4 +1,5 @@
-const chatModel = require("../Models/chatModel")
+const chatModel = require("../Models/chatModel");
+const groupChatModel = require("../Models/groupChatModel");
 const userModel = require("../Models/userModel")
 
 // create Chat
@@ -41,11 +42,16 @@ const findUserChats = async(req,res) =>{
     const userId = req.params.userId;
 
     try{
-        const chats = await chatModel.find({
+        const directChats = await chatModel.find({
             members: {$in: [userId]}
         });
 
-        return res.status(200).json(chats);
+        const groupChats = await groupChatModel.find({
+            members: { $in: [userId] }
+        });
+
+        const chats = [...directChats, ...groupChats];
+        return res.status(200).json({ chats });
 
     }catch(error){
         console.log(error);
@@ -71,4 +77,44 @@ const findChat = async(req,res) =>{
     }
 }
 
-module.exports = {createChat, findUserChats, findChat};
+const createGroupChat = async(req,res) =>{
+    
+    const { members, name } = req.body;
+    try {
+
+        if (members.length < 2) {
+            return res.status(400).json({ error: "At least two members are required for a group chat" });
+        }
+
+        const existingChat = await chatModel.findOne({
+            members: { $all: members }
+        });
+
+        if (existingChat) {
+            return res.status(200).json(existingChat); 
+        }
+
+        const users = await userModel.find({ '_id': { $in: members } });
+
+        if (users.length !== members.length) {
+            return res.status(404).json({ error: "One or more users not found" });
+        }
+
+        // Creating new group chat in the database
+        const newGroupChat = new groupChatModel({
+            name: name,
+            members: members,
+        });
+
+        const response = await newGroupChat.save();
+
+        return res.status(200).json(response);
+
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+}
+
+
+module.exports = {createChat, findUserChats, findChat, createGroupChat};

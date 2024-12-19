@@ -11,6 +11,7 @@ const userRoute = require("./Routes/userRoute");
 const chatRoute = require("./Routes/chatRoute");
 const messageRoute = require("./Routes/messageRoute");
 const config = require("./Config/config"); 
+const groupChat = require("./Models/groupChatModel");
 
 require("dotenv").config();
 
@@ -48,19 +49,41 @@ const io = new Server(expressServer, {
 let onlineUsers = [];
 
 io.on("connection", (socket) => {
-    socket.on("addNewUser", (userId) => {
-        if (!onlineUsers.some(user => user.userId === userId)) {
+    socket.on("addNewUser", (userId, userName) => {
+
+        const existingUser = onlineUsers.find(user => user.userId === userId);
+
+        if (existingUser) {
+            // Updating the socketId for the existing user
+            existingUser.socketId = socket.id;
+        } else {
+            // Adding the new user to the array
             onlineUsers.push({
                 userId,
-                socketId: socket.id
+                socketId: socket.id,
+                name: userName
             });
-            io.emit("getOnlineUsers", onlineUsers);
         }
+
+        // Emiting the updated list of online users
+        io.emit("getOnlineUsers", onlineUsers);
     });
+
+        // Handling group chat making
+        socket.on("groupChatCreated", ({ userId, chatId, name, encryptedKey, creatorPublicKey }) => {
+            const user = onlineUsers.find(user => user.userId === userId);
+            if (user) {
+                io.to(user.socketId).emit("addGroupChat", {
+                    chatId,
+                    name,
+                    encryptedKey,
+                    publicKey: creatorPublicKey
+                });
+            }
+        });
 
     // When a new chat is created, notify the recipient with both public keys
     socket.on("chatCreated", ({ chatId, recipientId, publicKey }) => {
-        console.log("RecipientID", recipientId);
         const user = onlineUsers.find(user => user.userId === recipientId);
         io.to(user.socketId).emit("newChatCreated", { chatId, publicKey });
     });
@@ -69,7 +92,7 @@ io.on("connection", (socket) => {
     socket.on("disconnect", async() => {
         const user = onlineUsers.find(user => user.socketId === socket.id);
         if (user) {
-            await deleteUserChatsAndMessages(user.userId,io);
+            await deleteUserChatsAndMessages(user.userId, io);
             onlineUsers = onlineUsers.filter((u) => u.socketId !== socket.id);
             io.emit("getOnlineUsers", onlineUsers);
         }
@@ -77,31 +100,69 @@ io.on("connection", (socket) => {
     
 
     socket.on("sendMessage", (message) => {
-        const user = onlineUsers.find(user => user.userId === message.recipientId);
-        if (user) {
-            io.to(user.socketId).emit("getMessage", message);
-        }
+
+        message.recipientIds.forEach((recipientId) => {
+            const user = onlineUsers.find(user => user.userId === recipientId);
+            if (user) {
+                io.to(user.socketId).emit("getMessage", message);
+            }
+        });
+
     });
 });
 
-
 const deleteUserChatsAndMessages = async (userId, io) => {
     try {
-        const chats = await Chat.find({ members: userId });
-        // Delete all messages and chats from the user
-        for (const chat of chats) {
+        const oneToOneChats  = await Chat.find({ members: userId });
+        const groupChats = await groupChat.find({ members: userId });
+        // Delete all messages and chats from the one to one chats
+        for (const chat of oneToOneChats) {
+            const membersIds = chat.members; // Assuming this is the correct variable
 
-            const otherUserId = chat.members.find((member) => member !== userId);
-            const otherUser = onlineUsers.find(user => user.userId === otherUserId);
-            // Notify the other user about the chat deletion
-            console.log("Emiting chat deletion :", otherUserId);
-            io.to(otherUser.socketId).emit("chatDeleted");
-
-            // Delete all messages in this chat
+            // Delete messages and the chat
             await Message.deleteMany({ chatId: chat._id });
-
             await chat.deleteOne({ _id: chat._id });
+
+            membersIds.forEach(memberId => {
+                const member = onlineUsers.find(user => user.userId === memberId);
+                if (member) {
+                    io.to(member.socketId).emit("chatDeleted");
+                }
+            });
         }
+
+         // Handling group chats
+         for (const groupChat of groupChats) {
+            const updatedMembers = groupChat.members.filter((member) => member !== userId);
+            groupChat.members = updatedMembers;
+
+            if (updatedMembers.length === 1) {
+                await Message.deleteMany({ chatId: groupChat._id });
+                await groupChat.deleteOne();
+
+                // Notifing all members of the group about the deletion
+                groupChat.members.forEach((memberId) => {
+                    const otherUser = onlineUsers.find(user => user.userId === memberId);
+                    if (otherUser) {
+                        io.to(otherUser.socketId).emit("chatDeleted");
+                    }
+                });
+
+            } else {
+                // Save the updated group chat
+                await groupChat.save();
+
+                // Notifing all remaining members about the user removal
+                updatedMembers.forEach((memberId) => {
+                    const otherUser = onlineUsers.find(user => user.userId === memberId);
+                    if (otherUser && otherUser.socketId) {
+                        io.to(otherUser.socketId).emit("userRemoved");
+                    }
+                });
+            }
+        }
+
+
     } catch (error) {
         console.error(`There was a problem while deleting chat and messages of the user: ${userId}:`, error);
     }

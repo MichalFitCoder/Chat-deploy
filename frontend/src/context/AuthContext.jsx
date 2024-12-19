@@ -125,8 +125,7 @@
             setLoginInfo({ email: "", password: "" });
             setUser(null);
             sessionStorage.clear();
-            sessionStorage.clear();
-            console.log("Session ended, removing password and private key");
+            location.reload();
 
         }, [setLoginInfo, setUser]);
 

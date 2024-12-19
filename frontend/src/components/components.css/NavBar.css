@@ -64,3 +64,16 @@ body{
     }
   }
   
+  .menu-button {
+    background-color: #007bff;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 5px;
+    text-decoration: none;
+    font-weight: bold;
+  }
+  
+  .menu-button:hover {
+    background-color: #0056b3;
+    color: white;
+  }

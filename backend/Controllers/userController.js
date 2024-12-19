@@ -282,4 +282,21 @@ const addPublicKey = async (req, res) => {
     }
 };
 
-module.exports = { registerUser, loginUser, findUser, getUsers, addPublicKey};
+const getPublicKey = async (req, res) => {
+    const userId = req.params.userId;
+    try {
+        const user = await userModel.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        return res.status(200).json({ publicKey: user.publicKey });
+    } catch (error) {
+        console.error("Error fetching public key", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+
+module.exports = { registerUser, loginUser, findUser, getUsers, addPublicKey, getPublicKey };

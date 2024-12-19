@@ -1,5 +1,4 @@
-//export const baseUrl = "http://localhost:5000/api";
-export const baseUrl = "https://gogachat.onrender.com/api";
+export const baseUrl = import.meta.env.VITE_BASE_URL;
 
 export const postRequest = async(url, body) =>{
     const response = await fetch(url, {
@@ -31,7 +30,7 @@ export const postRequest = async(url, body) =>{
 export const getRequest = async(url) => {
 
     const response = await fetch(url);
-    const data = await response.json()
+    const data = await response.json();
 
     // Handling errors
     if(!response.ok){

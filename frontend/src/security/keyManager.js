@@ -29,7 +29,7 @@ export const importPublicKey = async (publicKeyBase64) => {
 };
 
 // Helper function to convert ArrayBuffer to Base64
-const arrayBufferToBase64 = (buffer) => {
+export const arrayBufferToBase64 = (buffer) => {
     let binary = '';
     const bytes = new Uint8Array(buffer);
     bytes.forEach((byte) => binary += String.fromCharCode(byte));

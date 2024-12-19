@@ -2,7 +2,7 @@ import { createContext, useState, useEffect, useCallback, useContext } from "rea
 import { getRequest, baseUrl, postRequest } from "../utils/services";
 import { io } from "socket.io-client";
 import forge from "node-forge";
-import { importPublicKey, importPrivateKey , getStoredSharedKey, storeSharedKey, deriveSharedKey} from "../security/keyManager";
+import { importPublicKey, importPrivateKey , getStoredSharedKey, storeSharedKey, deriveSharedKey, arrayBufferToBase64} from "../security/keyManager";
 
 export const ChatContext = createContext();
 
@@ -25,7 +25,7 @@ export const ChatContextProvider = ({ children, user }) => {
     useEffect(() => {
         const newSocket = io(import.meta.env.VITE_SOCKET_URL);
         setSocket(newSocket);
-
+        setChatDeleted(false);
         return () => {
             newSocket.disconnect();
             setMessages([]);
@@ -35,7 +35,7 @@ export const ChatContextProvider = ({ children, user }) => {
     useEffect(() => {
         // Adding online users
         if (socket === null || !user?._id) return;
-        socket.emit("addNewUser", user?._id);
+        socket.emit("addNewUser", user?._id, user?.name);
         socket.on("getOnlineUsers", (res) => {
             setOnlineUsers(res);
         });
@@ -50,49 +50,96 @@ export const ChatContextProvider = ({ children, user }) => {
     useEffect(() => {
         if (!socket || !user?._id) return;
     
-        // Listen for the new chat event
-        socket.on("newChatCreated", async ({ chatId, publicKey }) => {
+        const handleNewChatCreated = async ({ chatId, publicKey }) => {
             try {
-                // Import the sender public key
                 const importedPublicKey = await importPublicKey(publicKey);
     
                 const privateKey = sessionStorage.getItem("privateKey");
+                if (!privateKey) {
+                    console.error("Private key not found in sessionStorage.");
+                    return;
+                }
+
                 const importedPrivateKey = await importPrivateKey(privateKey);
     
-                console.log("PrivateKey", privateKey);
-                console.log("PublicKey", publicKey);
-
                 if (!importedPrivateKey) {
                     console.error("Private key not found in sessionStorage!");
                     return;
                 }
     
-                // Derive the shared key using the private key and imported public key
+                // Deriving shared key using the private key and imported public key
                 const sharedKey = await deriveSharedKey(importedPrivateKey, importedPublicKey);
     
                 // Store the derived shared key in sessionStorage
                 storeSharedKey(chatId, sharedKey);
-
+    
                 setRefreshUserChats((prev) => !prev);
-                console.log(`Shared key for chat ${chatId} created and stored.`);
             } catch (error) {
                 console.error("Error handling 'newChatCreated' event:", error);
             }
-        });
-
-        socket.on("chatDeleted", () => {
-            setTimeout(() => {
-                setRefreshUserChats((prev) => !prev);
-                setMessages([]);
-                setChatDeleted(true);
-            },100); // Delay needed for deleting chats and messages
-        });
-
-        // Cleanup the event listener on unmount or when socket changes
-        return () => {
-            socket.off("newChatCreated");
         };
-    }, [socket]);
+    
+        const handleAddGroupChat = async ({ chatId, name, encryptedKey, publicKey }) => {
+            try {
+                const privateKeyBase64 = sessionStorage.getItem("privateKey");
+                if (!privateKeyBase64) {
+                    console.error("Private key not found for decrypting the symmetric key.");
+                    return;
+                }
+    
+                // Generating shared secret with the creator of the chat
+                const privateKey = await importPrivateKey(privateKeyBase64);
+                const creatorPublicKey = await importPublicKey(publicKey);
+                const sharedSecret = await deriveSharedKey(privateKey, creatorPublicKey);
+    
+                const encryptedKeyBuffer = Uint8Array.from(atob(encryptedKey), (c) => c.charCodeAt(0)).buffer;
+    
+                // Decrypting the symmetric key using the private key
+                const decryptedKeyBuffer = await window.crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: new Uint8Array(12) },
+                    sharedSecret,
+                    encryptedKeyBuffer
+                );
+    
+                const symmetricKey = await window.crypto.subtle.importKey(
+                    "raw",
+                    decryptedKeyBuffer,
+                    { name: "AES-GCM", length: 256 },
+                    true,
+                    ["encrypt", "decrypt"]
+                );
+                storeSharedKey(chatId, symmetricKey);
+            } catch (error) {
+                console.error("Error handling 'addGroupChat' event:", error);
+            }
+            // Triggering chat refresh
+            setRefreshUserChats((prev) => !prev);
+        };
+    
+        const handleChatDeleted = () => {
+            setRefreshUserChats((prev) => !prev);
+            setMessages([]);
+            setChatDeleted(true);
+        };
+    
+        const handleUserRemoved = () => {
+            setRefreshUserChats((prev) => !prev);
+        };
+    
+        // Rejestracja nasłuchiwaczy
+        socket.on("newChatCreated", handleNewChatCreated);
+        socket.on("addGroupChat", handleAddGroupChat);
+        socket.on("chatDeleted", handleChatDeleted);
+        socket.on("userRemoved", handleUserRemoved);
+    
+        // Cleanup nasłuchiwaczy przy odmontowaniu lub zmianie socket
+        return () => {
+            socket.off("newChatCreated", handleNewChatCreated);
+            socket.off("addGroupChat", handleAddGroupChat);
+            socket.off("chatDeleted", handleChatDeleted);
+            socket.off("userRemoved", handleUserRemoved);
+        };
+    }, [socket, user?._id]);
 
 
 
@@ -100,7 +147,7 @@ export const ChatContextProvider = ({ children, user }) => {
     const sendTextMessage = useCallback(async (textMessage, sender, currentChatId, setTextMessage) => {
         if (!textMessage || !currentChat) return;
 
-        const recipientId = currentChat.members.find((id) => id !== user?._id);
+        const recipientIds = currentChat.members.filter((id) => id !== user?._id);
 
         try {
             // Get or generate the shared key for this chat
@@ -127,6 +174,7 @@ export const ChatContextProvider = ({ children, user }) => {
             const response = await postRequest(`${baseUrl}/messages`, JSON.stringify({
                 chatId: currentChatId,
                 senderId: sender?._id,
+                senderName: sender?.name,
                 text: encryptedMessageBase64,
                 iv: ivBase64 
             }));
@@ -144,7 +192,7 @@ export const ChatContextProvider = ({ children, user }) => {
             setTextMessage("");
     
             // Emit the encrypted message through the socket
-            socket.emit("sendMessage", { ...response, recipientId });
+            socket.emit("sendMessage", { ...response, recipientIds });
         } catch (error) {
             console.error("Error while encrypting the message:", error);
         }
@@ -191,12 +239,6 @@ export const ChatContextProvider = ({ children, user }) => {
                 console.error("Error decrypting received message:", error);
             }
 
-
-            // Avoid duplicating messages
-            setMessages((prev) => {
-                if (prev.some((msg) => msg._id === res._id)) return prev;
-                return [...prev, res];
-            });
         });
 
         return () => {
@@ -214,9 +256,17 @@ export const ChatContextProvider = ({ children, user }) => {
             }
 
             const pChats = response.filter((u) => {
-                if (user?._id === u._id) return false;
-                return onlineUsers.some(onlineUser => onlineUser.userId === u._id) && !userChats.some((chat) => chat.members.includes(u._id));
+                if (user?._id === u._id) return false; // Skip the current user
+    
+            const isUserOnline = onlineUsers.some(onlineUser => onlineUser.userId === u._id);
+            const isUserInOneToOneChat = userChats.some((chat) => 
+                chat.members.length === 2 && chat.members.includes(u._id) // Only one-on-one chats
+            );
+
+            // Return the user only if they are online and not in a one-to-one chat
+            return isUserOnline && !isUserInOneToOneChat;
             });
+    
 
             setPotentialChats(pChats);
         };
@@ -229,7 +279,6 @@ export const ChatContextProvider = ({ children, user }) => {
     useEffect(() => {
         const getUserChats = async () => {
             if (user?._id) {
-                console.log("refreshed User chats");
                 setUserChatsLoading(true);
                 setUserChatsError(null);
                 const response = await getRequest(`${baseUrl}/chats/${user?._id}`);
@@ -238,8 +287,7 @@ export const ChatContextProvider = ({ children, user }) => {
                 if (response.error) {
                     return setUserChatsError(response);
                 }
-                console.log("Chats avaible for the user:", response);
-                setUserChats(response);
+                setUserChats(response.chats);
             }
         };
 
@@ -326,8 +374,11 @@ export const ChatContextProvider = ({ children, user }) => {
     
             // Fetch the public key of the second user
             const userPublicKey = sessionStorage.getItem("publicKey").replace(/^"|"$/g, '').trim();
-            console.log(userPublicKey);
-            console.log(response.publicKey1);
+            if (!userPublicKey) {
+                console.error("Public key not found in sessionStorage.");
+                return;
+            }
+
             const recipientPublicKey = response?.publicKey1 === userPublicKey 
                 ? response?.publicKey2 
                 : response?.publicKey1;
@@ -339,15 +390,17 @@ export const ChatContextProvider = ({ children, user }) => {
     
             const importedPublicKey = await importPublicKey(recipientPublicKey);
     
-            // Generate and store the shared key for the chat
             const privateKey = sessionStorage.getItem("privateKey");
+            if (!privateKey) {
+                console.error("Private key not found in sessionStorage.");
+                return;
+            }
             const importedPrivateKey = await importPrivateKey(privateKey);
     
             if (!importedPrivateKey) {
                 console.error("Private key not found in sessionStorage!");
                 return;
             }
-
             
             const sharedKey = await deriveSharedKey(importedPrivateKey, importedPublicKey);
             storeSharedKey(response._id, sharedKey);
@@ -366,6 +419,94 @@ export const ChatContextProvider = ({ children, user }) => {
         }
     }, [socket]);
 
+    //========================= Handling group Chats ==============================
+
+    const inicializeGroupChat = async(selectedUserIds, groupName) => {
+        const chatMembers = selectedUserIds;
+        chatMembers.push(user?._id);
+        const response = await postRequest(`${baseUrl}/chats/groupChat`, JSON.stringify({
+            name: groupName,
+            members: chatMembers
+        }));
+
+        if (response.error) {
+            console.log("Error creating chat", response);
+            return;
+        }
+        // Adding new chat to the user's chats
+        setUserChats((prev) => [...prev, response]);
+
+        const symmetricKeyRaw = crypto.getRandomValues(new Uint8Array(32)); 
+
+        const symmetricKey = await window.crypto.subtle.importKey(
+            "raw",
+            symmetricKeyRaw,
+            { name: "AES-GCM", length: 256 },
+            true,
+            ["encrypt", "decrypt"]
+        );
+        storeSharedKey(response._id, symmetricKey)
+
+        const privateKey = sessionStorage.getItem("privateKey");
+        if (!privateKey) {
+            console.error("Private key not found in sessionStorage.");
+            return;
+        }
+
+        const importedPrivateKey = await importPrivateKey(privateKey);
+
+        if (!importedPrivateKey) {
+            console.error("Private key not found in sessionStorage!");
+            return;
+        }
+
+        // Getting creators public key from storage
+        const userPublicKey = sessionStorage.getItem("publicKey").replace(/^"|"$/g, '').trim();
+        if (!userPublicKey) {
+            console.error("Public key not found in sessionStorage.");
+            return;
+        }
+
+        await Promise.all(selectedUserIds.map(async (id) => {
+            try{
+                const publicKeyResponse = await getRequest(`${baseUrl}/users/publicKey/${id}`);
+
+                if (publicKeyResponse.error) {
+                    console.error(`Error fetching public key for user ${id}`, publicKeyResponse);
+                    return;
+                }
+
+                const publicKeyBase64 = publicKeyResponse.publicKey;
+                const importedPublicKey = await importPublicKey(publicKeyBase64);
+                
+                const sharedKey = await deriveSharedKey(importedPrivateKey, importedPublicKey);
+
+                const symmetricKeyRaw = await window.crypto.subtle.exportKey("raw", symmetricKey);
+
+                // Encrypt the symmetric chat key using the shared key
+                const encryptedSymmetricKey = await window.crypto.subtle.encrypt(
+                    { name: "AES-GCM", iv: new Uint8Array(12) },
+                    sharedKey,
+                    symmetricKeyRaw
+                );
+                // Converting the encrypted key to Base64
+                const encryptedKeyBase64 = arrayBufferToBase64(encryptedSymmetricKey);
+
+                socket.emit("groupChatCreated", {
+                    userId: id,
+                    chatId: response._id,
+                    encryptedKey: encryptedKeyBase64,
+                    name: groupName,
+                    creatorPublicKey: userPublicKey
+                });
+            } catch (error) {
+                console.error(`Error processing user ${id}:`, error);
+            }
+        
+        }));
+    }
+    
+
 
     return (
         <ChatContext.Provider value={{
@@ -382,6 +523,7 @@ export const ChatContextProvider = ({ children, user }) => {
             currentChat,
             sendTextMessage,
             onlineUsers,
+            inicializeGroupChat,
         }}>
             {children}
         </ChatContext.Provider>

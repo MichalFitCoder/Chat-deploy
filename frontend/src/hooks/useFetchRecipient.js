@@ -1,27 +1,37 @@
 import { useEffect, useState } from "react";
 import { baseUrl, getRequest } from "../utils/services";
 
-export const useFetchRecipientUser = (chat, user) =>{
-    const [recipientUser, setRecipientUser] = useState(null);
+export const useFetchRecipientUsers = (chat, user) =>{
+    const [recipientUsers, setRecipientUsers] = useState([]);
     const [error, setError] = useState(null);
     
-    const recipientId = chat?.members?.find((id) => id !== user?._id);
+    const recipientIds = chat?.members?.filter((id) => id !== user?._id);
 
     useEffect(()=>{
         const getUser = async()=>{
-            if(!recipientId) return null;
+            if(!recipientIds || recipientIds.length === 0) return null;
 
-            const response = await getRequest(`${baseUrl}/users/find/${recipientId}`);
+            try {
+                // Fetching all recipient users one by one
+                const userResponses = await Promise.all(
+                    recipientIds.map(async (recipientId) => {
+                        const response = await getRequest(`${baseUrl}/users/find/${recipientId}`);
+                        if (response.error) {
+                            throw new Error(`Error fetching user: ${response.error}`);
+                        }
+                        return response;
+                    })
+                );
 
-            if(response.error){
-                return setError(response)
+                setRecipientUsers(userResponses);
+            } catch (err) {
+                setError(err.message || "Error fetching users");
             }
 
-            setRecipientUser(response);
         }
 
         getUser();
-    },[recipientId]);
+    },[recipientIds]);
 
-    return {recipientUser, error};
+    return {recipientUsers, error, setRecipientUsers};
 }
